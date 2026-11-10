@@ -58,6 +58,20 @@ async def async_setup_entry(
         entities = []
         for station_id, station_name in stations.items():
             station_data = coordinator.data.get(station_id, {}) if coordinator.data else {}
+
+            station_config = (station_data.get("station_info") or {}).get("config")
+            if isinstance(station_config, dict) and station_config.get(
+                "power_limit"
+            ) not in (None, ""):
+                entities.append(
+                    HoymilesStationPowerLimit(
+                        coordinator=coordinator,
+                        api=api,
+                        station_id=station_id,
+                        station_name=station_name,
+                    )
+                )
+
             battery_settings = station_data.get("battery_settings", {})
             if not battery_settings_writable(battery_settings):
                 continue
@@ -247,6 +261,84 @@ class HoymilesBatteryNumberEntity(CoordinatorEntity, NumberEntity):
         return self.coordinator.last_update_success and battery_settings_writable(
             self._get_battery_settings()
         )
+
+
+class HoymilesStationPowerLimit(CoordinatorEntity, NumberEntity):
+    """Station-level AC power limit as a percentage.
+
+    The cloud applies this through command action 8 and only reflects it in
+    ``station_info.config.power_limit``, which the coordinator refreshes on the
+    static interval. The entity therefore holds the requested value until the
+    readback catches up.
+    """
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        api: HoymilesAPI,
+        station_id: str,
+        station_name: str,
+    ) -> None:
+        """Initialize the station power limit control."""
+        super().__init__(coordinator)
+        self._api = api
+        self._station_id = station_id
+        self._station_name = station_name
+        self._optimistic: float | None = None
+        self._attr_unique_id = f"{DOMAIN}_{station_id}_station_power_limit_set"
+        self._attr_name = f"{station_name} Power Limit Setting"
+        self._attr_native_min_value = 2
+        self._attr_native_max_value = 100
+        self._attr_native_step = 1
+        self._attr_mode = NumberMode.BOX
+        self._attr_native_unit_of_measurement = PERCENTAGE
+        self._attr_device_info = build_device_info(station_id, station_name)
+
+    def _get_station_data(self) -> dict[str, Any]:
+        """Return the current station payload."""
+        return get_station_data(self.coordinator, self._station_id)
+
+    def _readback(self) -> float | None:
+        """Return the limit the cloud reports, if any."""
+        config = (self._get_station_data().get("station_info") or {}).get("config")
+        if not isinstance(config, dict):
+            return None
+        try:
+            return float(config.get("power_limit"))
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the requested value until the readback confirms it."""
+        if self._optimistic is not None:
+            return self._optimistic
+        return self._readback()
+
+    @property
+    def available(self) -> bool:
+        """Return whether this station exposes a power limit."""
+        return self.coordinator.last_update_success and self._readback() is not None
+
+    def _handle_coordinator_update(self) -> None:
+        """Drop the optimistic value once the readback agrees."""
+        if self._optimistic is not None:
+            readback = self._readback()
+            if readback is not None and abs(readback - self._optimistic) < 0.5:
+                self._optimistic = None
+        super()._handle_coordinator_update()
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write a new station power limit."""
+        percent = int(round(value))
+        if not await self._api.set_station_power_limit(self._station_id, percent):
+            raise HomeAssistantError(
+                f"Hoymiles rejected the power limit update for station "
+                f"{self._station_name}. See the Home Assistant log for details."
+            )
+
+        self._optimistic = float(percent)
+        self.async_write_ha_state()
 
 
 class HoymilesBatteryReserveSOC(HoymilesBatteryNumberEntity):

@@ -13,6 +13,8 @@ HoymilesAPI = hoymiles_api_module.HoymilesAPI
 # The verification read-back waits between attempts against the real cloud;
 # tests drive a fake session, so there is nothing to wait for.
 hoymiles_api_module.BATTERY_WRITE_VERIFY_DELAY = 0
+# Command status polling waits one second between attempts on the real cloud.
+hoymiles_api_module.DEVICE_COMMAND_POLL_INTERVAL = 0
 AUTH_ERROR_APP_UPDATE_REQUIRED = auth_module.AUTH_ERROR_APP_UPDATE_REQUIRED
 AUTH_ERROR_S_MILES_HOME_REQUIRED = auth_module.AUTH_ERROR_S_MILES_HOME_REQUIRED
 auth_error_to_config_error = auth_module.auth_error_to_config_error
@@ -978,3 +980,45 @@ def test_real_credential_rejection_still_returns_false():
                       'example@example.test', 'synthetic-password')
     assert not asyncio.run(api.authenticate(auth_mode='legacy_v0'))
     assert api.last_auth_error_key == 'invalid_auth'
+
+
+def test_set_station_power_limit_polls_until_success():
+    """Action 8 must be sent as observed and followed to a final state."""
+    session = FakeSession([
+        {'status': '0', 'message': 'success', 'data': '369673500'},
+        {'status': '0', 'message': 'success', 'data': {'back': 1, 'code': 2, 'rate': 1}},
+        {'status': '0', 'message': 'success', 'data': {'back': 1, 'code': 0, 'rate': 100}},
+    ])
+    api = HoymilesAPI(session, 'example@example.test', 'synthetic-password')
+    api._token = 'token'
+    api._token_expires_at = 9999999999
+
+    assert asyncio.run(api.set_station_power_limit('14091820', 75)) is True
+    assert session.requests[0]['kwargs']['json'] == {
+        'action': 8,
+        'data': {'sid': 14091820, 'power_limit': 75, 'enable': 1},
+    }
+    assert session.requests[1]['kwargs']['json'] == {'id': '369673500'}
+
+
+def test_set_station_power_limit_reports_device_rejection():
+    """A device-level failure must not be reported as a successful write."""
+    session = FakeSession([
+        {'status': '0', 'message': 'success', 'data': '369661340'},
+        {'status': '0', 'message': 'success', 'data': {'back': 1, 'code': 1, 'rate': 100}},
+    ])
+    api = HoymilesAPI(session, 'example@example.test', 'synthetic-password')
+    api._token = 'token'
+    api._token_expires_at = 9999999999
+
+    assert asyncio.run(api.set_station_power_limit('14091820', 75)) is False
+
+
+def test_set_station_power_limit_rejects_values_outside_the_ui_range():
+    """The manufacturer UI offers 2-100 %, so refuse anything else locally."""
+    session = FakeSession([])
+    api = HoymilesAPI(session, 'example@example.test', 'synthetic-password')
+
+    assert asyncio.run(api.set_station_power_limit('14091820', 101)) is False
+    assert asyncio.run(api.set_station_power_limit('14091820', 1)) is False
+    assert session.requests == []

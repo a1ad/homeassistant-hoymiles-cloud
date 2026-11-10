@@ -66,6 +66,20 @@ API_BATTERY_SETTINGS_READ_URL = f"{API_BASE_URL}/pvm-ctl/api/0/dev/setting/read"
 API_BATTERY_SETTINGS_WRITE_URL = f"{API_BASE_URL}/pvm-ctl/api/0/dev/setting/write"
 API_BATTERY_SETTINGS_STATUS_URL = f"{API_BASE_URL}/pvm-ctl/api/0/dev/setting/status"
 
+# Device command relay. The manufacturer web client routes both the station
+# "Power limit" drawer and the per-device "Power control" drawer through these
+# two endpoints and reports the outcome as an asynchronous job.
+API_DEVICE_COMMAND_URL = f"{API_BASE_URL}/pvm-ctl/api/0/dev/command/put"
+API_DEVICE_COMMAND_STATUS_URL = f"{API_BASE_URL}/pvm-ctl/api/0/dev/command/put_status"
+
+# Action 8 carries {sid, power_limit, enable} for the station level limit. The
+# same number is CMD_ACTION_LIMIT_POWER on the local DTU protocol.
+DEVICE_COMMAND_STATION_POWER_LIMIT = 8
+# Job states in DEVICE_COMMAND_STATUS data: 0 = success, 1 = failed,
+# 2 = still running, 3 = timeout.
+DEVICE_COMMAND_STATE_SUCCESS = 0
+DEVICE_COMMAND_STATE_RUNNING = 2
+
 # Ancillary endpoints
 API_EPS_SETTINGS_URL = f"{API_BASE_URL}/eps/api/0/setting/g_a"
 API_EPS_PROFIT_URL = f"{API_BASE_URL}/eps/api/0/record/stat_a"

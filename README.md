@@ -53,6 +53,25 @@ notes for known limitations and validation scope.
   - Force Charge and Force Discharge modes, including their `max_power` limit, on stations whose account exposes them
   - Home Assistant-native draft editors for Economy and Time of Use schedules using built-in selects, text fields, numbers, buttons, and summary sensors
   - Advanced battery mode payload updates through Home Assistant services for Economy and Time of Use schedules
+  - Station-level AC power limit (2-100 %) when the account exposes `station_info.config.power_limit`, plus a read-only diagnostic sensor for the value the cloud reports
+
+### Power limit control
+
+Stations that carry a power limit get two entities:
+
+- **Power Limit** (diagnostic sensor) - the percentage the cloud reports
+- **Power Limit Setting** (number) - writes a new percentage through device
+  command action 8 and holds the requested value until the readback agrees
+
+The write is a stored device setting, not a runtime override: it survives an
+inverter restart and costs a flash write on every call. That is fine for a
+seasonal setting or a manual adjustment; it is **not** suitable for a control
+loop that adjusts output every few seconds. The observed job takes about seven
+seconds to complete, and the `-WB` series has no temporary/RAM variant.
+
+Endpoint details, job states and the paths that were ruled out for
+microinverter stations are in
+[`docs/hoymiles-power-limit-api.md`](docs/hoymiles-power-limit-api.md).
 
 ## Breaking change in 1.2.0: battery power sign convention
 

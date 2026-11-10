@@ -41,6 +41,11 @@ from .const import (
     API_BATTERY_SETTINGS_READ_URL,
     API_BATTERY_SETTINGS_WRITE_URL,
     API_BATTERY_SETTINGS_STATUS_URL,
+    API_DEVICE_COMMAND_URL,
+    API_DEVICE_COMMAND_STATUS_URL,
+    DEVICE_COMMAND_STATION_POWER_LIMIT,
+    DEVICE_COMMAND_STATE_RUNNING,
+    DEVICE_COMMAND_STATE_SUCCESS,
     API_EPS_SETTINGS_URL,
     API_EPS_PROFIT_URL,
     API_AI_STATUS_URL,
@@ -127,6 +132,15 @@ INDICATOR_ENDPOINT_NAMES: dict[int, str] = {
 }
 BATTERY_SETTINGS_MAX_POLLS = 10
 BATTERY_SETTINGS_POLL_INTERVAL = 1.0
+
+# The command relay applies a station power limit in about seven seconds on the
+# observed installation, so allow a little more headroom before giving up.
+DEVICE_COMMAND_MAX_POLLS = 20
+DEVICE_COMMAND_POLL_INTERVAL = 1.0
+
+# The manufacturer UI accepts 2-100 % for the station active-power limit.
+STATION_POWER_LIMIT_MIN = 2
+STATION_POWER_LIMIT_MAX = 100
 
 
 # A battery write leaves the plant "pending" for a few seconds, so the
@@ -2013,6 +2027,107 @@ class HoymilesAPI:
             "transports but the plant did not change",
             station_id,
             mode,
+        )
+        return False
+
+    async def set_station_power_limit(self, station_id: str, power_limit: int) -> bool:
+        """Set the station-level AC power limit as a percentage.
+
+        The cloud relays this to the DTU as command action 8 and reports the
+        outcome as an asynchronous job. ``station_info.config.power_limit`` is
+        the only readback, so callers should refresh the station details.
+        """
+        percent = int(power_limit)
+        if not STATION_POWER_LIMIT_MIN <= percent <= STATION_POWER_LIMIT_MAX:
+            _LOGGER.error(
+                "Refusing power limit %s for station %s: outside %s-%s%%",
+                percent,
+                station_id,
+                STATION_POWER_LIMIT_MIN,
+                STATION_POWER_LIMIT_MAX,
+            )
+            return False
+
+        await self._ensure_authenticated()
+        payload = {
+            "action": DEVICE_COMMAND_STATION_POWER_LIMIT,
+            "data": {"sid": int(station_id), "power_limit": percent, "enable": 1},
+        }
+        _LOGGER.debug("Cloud command; payload omitted for privacy")
+
+        try:
+            response = await self._submit_battery_settings_command(
+                API_DEVICE_COMMAND_URL,
+                payload,
+                log_label=f"power limit write for station {station_id}",
+            )
+        except (aiohttp.ClientError, json.JSONDecodeError) as err:
+            _LOGGER.error("Error sending power limit command: %s", err)
+            return False
+
+        return await self._await_device_command(
+            response,
+            f"power limit write for station {station_id}",
+        )
+
+    async def _await_device_command(
+        self, response: dict[str, Any], command_label: str
+    ) -> bool:
+        """Follow a device command job until it reports a final state."""
+        if response.get("status") != "0" or response.get("message") != "success":
+            _LOGGER.error(
+                "Command %s was rejected: %s - %s",
+                command_label,
+                response.get("status"),
+                response.get("message"),
+            )
+            return False
+
+        data = response.get("data")
+        job_id = data.get("id") if isinstance(data, dict) else data
+        if job_id in (None, ""):
+            _LOGGER.error("Command %s returned no job id", command_label)
+            return False
+
+        for _attempt in range(DEVICE_COMMAND_MAX_POLLS):
+            try:
+                status = await self._post_json(
+                    API_DEVICE_COMMAND_STATUS_URL,
+                    {"id": str(job_id)},
+                )
+            except (aiohttp.ClientError, json.JSONDecodeError) as err:
+                _LOGGER.error("Command %s status poll failed: %s", command_label, err)
+                return False
+
+            if status.get("status") != "0":
+                _LOGGER.error(
+                    "Command %s status was rejected: %s - %s",
+                    command_label,
+                    status.get("status"),
+                    status.get("message"),
+                )
+                return False
+
+            body = status.get("data")
+            state = body.get("code") if isinstance(body, dict) else None
+            if state == DEVICE_COMMAND_STATE_SUCCESS:
+                _LOGGER.info("Command %s completed", command_label)
+                return True
+            if state != DEVICE_COMMAND_STATE_RUNNING:
+                _LOGGER.error(
+                    "Command %s failed with state %s: %s",
+                    command_label,
+                    state,
+                    json.dumps(body)[:400],
+                )
+                return False
+
+            await asyncio.sleep(DEVICE_COMMAND_POLL_INTERVAL)
+
+        _LOGGER.error(
+            "Command %s did not finish within %s polls",
+            command_label,
+            DEVICE_COMMAND_MAX_POLLS,
         )
         return False
 
