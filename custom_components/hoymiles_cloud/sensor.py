@@ -77,7 +77,7 @@ _LOGGER = logging.getLogger(__name__)
 _NON_TELEMETRY_SENSOR_KEYS = {
     "electricity_buy_price", "electricity_sell_price", "ai_status",
     "ai_compound_mode", "firmware_status", "reported_inverter_count",
-    "battery_settings_access",
+    "battery_settings_access", "station_power_limit",
 }
 
 
@@ -601,6 +601,20 @@ STATION_SENSORS: list[HoymilesSensorDescription] = [
         name="Reported Inverter Count",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: safe_int_convert(get_reflux_data(data).get("inv_num")),
+    ),
+    HoymilesSensorDescription(
+        key="station_power_limit",
+        name="Power Limit",
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: safe_float_convert(
+            (data.get("station_info", {}).get("config") or {}).get("power_limit")
+        ),
+        exists_fn=lambda data: (data.get("station_info", {}).get("config") or {}).get(
+            "power_limit"
+        )
+        not in (None, ""),
     ),
     HoymilesSensorDescription(
         key="last_update_time",
