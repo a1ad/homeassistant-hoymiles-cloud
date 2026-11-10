@@ -1,17 +1,18 @@
 {
   "domain": "hoymiles_cloud",
-  "name": "Hoymiles Cloud",
+  "name": "Hoymiles Cloud (a1ad)",
   "codeowners": [
-    "@Philra94"
+    "@Philra94",
+    "@a1ad"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/Philra94/homeassistant-hoymiles-cloud",
+  "documentation": "https://github.com/a1ad/homeassistant-hoymiles-cloud",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/Philra94/homeassistant-hoymiles-cloud/issues",
+  "issue_tracker": "https://github.com/a1ad/homeassistant-hoymiles-cloud/issues",
   "requirements": [
     "argon2-cffi>=21.3.0"
   ],
   "single_config_entry": false,
-  "version": "1.4.0"
+  "version": "1.4.1"
 }
